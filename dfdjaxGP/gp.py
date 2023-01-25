@@ -90,8 +90,8 @@ class JaxDerviativeGP:
             length = numpyro.sample("corr_len", dist.LogNormal(0.0, 1.0))
 
             # compute kernel
-            k = self.get_cov_mat(X, X, length, var)
-            k = np.eye(X.shape[0])*1.e-4
+            k  = self.get_cov_mat(X, X, length, var)
+            k += np.eye(X.shape[0])*1.e-4
 
             # sample Y according to the standard gaussian process formula
             numpyro.sample(
