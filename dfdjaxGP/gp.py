@@ -83,72 +83,27 @@ class JaxDerviativeGP:
         else:
             return jax.vmap(lambda x1: jax.vmap(lambda y1: covfn(x1[0], x1[1], y1[0], y1[1], corr_len, marg_var))(x2))(x1)
         
-    def get_mixed_cov(self, X, deriv_num, corr_len, marg_var):
-        obs_cov = jnp.zeros(X.shape[0], X.shape[0])
-        
-        deriv_ind = []
-        for ii in range(len(np.unique(deriv_num))):
-            deriv_ind.append( np.where(deriv_num == np.unique(deriv_num)[ii])[0] )
-        obs_cov = self.get_cov_mat(self.train_X, self.train_X, corr_len, marg_var)
-        obs_cov = obs_cov + np.eye(self.train_n)*self.nugget
-        obs_inv = jnp.linalg.inv(obs_cov)
-        obs_w   = obs_inv @ self.train_y
-        
-        if derivative == None:
-            covfn     = self.cov_f
-            crossfn   = self.cov_f
-        elif self.n_dims == 1:
-            if "y" in derivative:
-                print("No y derivative for 1D data")
-                return None
-            if derivative == "df/dx":
-                crossfn   = grad(self.cov_f, argnums=0)
-                covfn     = grad(crossfn,    argnums=1)
-            else: 
-                d_order = int(derivative[-1])
-                eval_s  = "".join(["grad("]*d_order) + "self.cov_f" + "".join([", argnums=0)"]*d_order)
-                crossfn = eval(eval_s)
-                eval_s  = "".join(["grad("]*d_order) + "crossfn" + "".join([", argnums=1)"]*d_order)
-                covfn = eval(eval_s)
-        else:
-            if "y" in derivative:
-                arg1 = "1"
-                arg2 = "3"
-            elif "x" in derivative:
-                arg1 = "0"
-                arg2 = "2"
+    def get_mixed_cov(self, x1, x2, d1, d2, corr_len, marg_var):
+        if self.n_dims == 1:
+            if d1 == 0:
+                crossfn = self.cov_f
             else:
-                print("Derivative needs to be an x or y derivative")
-                return 0
-            
-            if derivative == "df/dx":
-                crossfn = grad(self.cov_f, argnums=0)
-                covfn   = grad(crossfn,    argnums=2)
-            elif derivative == "df/dy":
-                crossfn = grad(self.cov_f, argnums=1)
-                covfn   = grad(crossfn,    argnums=3)
-            else: 
-                d_order = int(derivative[-1])
-                eval_s  = "".join(["grad("]*d_order) + "self.cov_f" + "".join([", argnums=" + arg1 + ")"]*d_order)
+                eval_s  = "".join(["grad("]*d1) + "self.cov_f" + "".join([", argnums=0)"]*d1)
                 crossfn = eval(eval_s)
-                eval_s  = "".join(["grad("]*d_order) + "crossfn" + "".join([", argnums=" + arg2 + ")"]*d_order)
+            if d2 == 0:
+                covfn   = crossfn
+            else:
+                eval_s  = "".join(["grad("]*d2) + "crossfn" + "".join([", argnums=1)"]*d2)
                 covfn = eval(eval_s)
-            
-        cross_cov = self.get_cov_mat(X, self.train_X, corr_len, marg_var, covfn=crossfn)
-        prior_cov = self.get_cov_mat(X, X, corr_len, marg_var, covfn=covfn)
+            return jax.vmap(lambda x1: jax.vmap(lambda y1: covfn(x1, y1, corr_len, marg_var))(x2))(x1)
+        else:
+            raise ValueError("Not implemented for higher than 1D input yet.")
         
-        y_hat = cross_cov @ obs_w
-        p_cov = prior_cov - cross_cov @ obs_inv @ cross_cov.T + np.eye(prior_cov.shape[0]) * 1.e-4
-                                
-        return y_hat + np.linalg.cholesky(p_cov) @ np.random.randn(p_cov.shape[0])
-
     def bayes_train(self, n_warmup = 500, n_samples=1000, n_chains=4):
         def model(X, y):
-            # set uninformative log-normal priors on our three kernel hyperparameters
             var    = numpyro.sample("marg_var", dist.LogNormal(0.0, 1.0))
             length = numpyro.sample("corr_len", dist.LogNormal(0.0, 1.0))
 
-            # compute kernel
             k  = self.get_cov_mat(X, X, length, var)
             k += np.eye(X.shape[0])*1.e-4
 
