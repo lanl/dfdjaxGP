@@ -83,13 +83,27 @@ class JaxDerviativeGP:
         else:
             return jax.vmap(lambda x1: jax.vmap(lambda y1: covfn(x1[0], x1[1], y1[0], y1[1], corr_len, marg_var))(x2))(x1)
         
+    def get_mixed_cov(self, x1, x2, d1, d2, corr_len, marg_var):
+        if self.n_dims == 1:
+            if d1 == 0:
+                crossfn = self.cov_f
+            else:
+                eval_s  = "".join(["grad("]*d1) + "self.cov_f" + "".join([", argnums=0)"]*d1)
+                crossfn = eval(eval_s)
+            if d2 == 0:
+                covfn   = crossfn
+            else:
+                eval_s  = "".join(["grad("]*d2) + "crossfn" + "".join([", argnums=1)"]*d2)
+                covfn = eval(eval_s)
+            return jax.vmap(lambda x1: jax.vmap(lambda y1: covfn(x1, y1, corr_len, marg_var))(x2))(x1)
+        else:
+            raise ValueError("Not implemented for higher than 1D input yet.")
+        
     def bayes_train(self, n_warmup = 500, n_samples=1000, n_chains=4):
         def model(X, y):
-            # set uninformative log-normal priors on our three kernel hyperparameters
             var    = numpyro.sample("marg_var", dist.LogNormal(0.0, 1.0))
             length = numpyro.sample("corr_len", dist.LogNormal(0.0, 1.0))
 
-            # compute kernel
             k  = self.get_cov_mat(X, X, length, var)
             k += np.eye(X.shape[0])*1.e-4
 
